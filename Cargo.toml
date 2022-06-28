@@ -3,12 +3,11 @@ name = "fast-lru"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "A simple LRU cache"
-
+description = "A fast, 100% safe, stack based LRU cache"
+repository = "https://github.com/LeadFreeCandy/lru"
 
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 arrayvec = "0.7.2"
-
