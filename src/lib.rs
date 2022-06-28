@@ -1,5 +1,9 @@
+#![deny(unsafe_code)]
+
+
 use std::{collections::HashMap};
 use std::hash::Hash;
+use arrayvec::ArrayVec;
 
 
 const NULL: usize = std::usize::MAX;
@@ -12,41 +16,49 @@ struct Entry<K, V>{
     next: usize,
 }
 
-pub struct LruCache<K, V> {
+pub struct LruCache<K, V, const CAP: usize> {
     // entries: HashMap<K, V>,
     // keys_to_vec: HashMap,
-    capacity: usize,
+    // capacity: usize,
     locations: HashMap<K, usize>,
     head: usize,
     tail: usize,
-    values: Vec<Entry<K, V>>,
+    values: ArrayVec<Entry<K, V>, CAP>,
 }
 
-impl <K, V > LruCache<K, V> 
+impl <K, V, const CAP: usize> LruCache<K, V, CAP> 
 where K: Hash + Eq + Clone{
-    pub fn new(capacity: usize) -> Self{
+    pub fn new() -> Self{
         Self {
-            capacity,
+            // capacity,
             locations: HashMap::new(),
-            values: Vec::new(),
+            values: ArrayVec::new(),
             head: NULL,
             tail: NULL,
         }
+
     }
 
-    pub fn put(&mut self, key: K, value: V){
+    pub fn put(&mut self, key: K, value: V) -> Option<V>{
         let k2 = key.clone();
         let val = self.locations.remove(&key);
+
+        let mut removed_value = None;
 
         if let Some(removed_index) = val {
             
             if self.len() == 1{
-                self.values[0].value = value;
+                // removed_value = Some(self.values[removed_index].value);
+
+                let old_val = std::mem::replace(&mut self.values[0].value, value);
+                removed_value = Some(old_val);
+                // self.values[0].value = value;
             } else {
                 let removed_entry = &mut self.values[removed_index];
-            
-                removed_entry.value = value;
 
+                let old_val = std::mem::replace(&mut removed_entry.value, value);
+                removed_value = Some(old_val);
+                // removed_entry.value = value;
                 self.move_to_head(removed_index);
             }
 
@@ -57,7 +69,7 @@ where K: Hash + Eq + Clone{
                 self.tail = 0;
                 self.add_first(key, value)
             } else {
-                if self.values.len() == self.capacity {
+                if self.values.len() == CAP{
                     let old_index = self.remove_tail();
                     self.add_to_head_indexed(old_index, key, value)
                 } else {
@@ -67,24 +79,102 @@ where K: Hash + Eq + Clone{
         }
 
         self.locations.insert(k2, self.head);
-
+        removed_value
         // println!("{:?}", self.values);
     }
 
-    pub fn get(&self, key: &K) -> Option<&V>{
+    pub fn push(&mut self, key: K, value: V) -> Option<(K, V)>{
+        let k2 = key.clone();
+        let val = self.locations.remove(&key);
+
+        let mut removed_value = None;
+
+        if let Some(removed_index) = val {
+            
+            if self.len() == 1{
+                // removed_value = Some(self.values[removed_index].value);
+
+                let old_val = std::mem::replace(&mut self.values[0].value, value);
+                removed_value = Some((key, old_val));
+                // self.values[0].value = value;
+            } else {
+                let removed_entry = &mut self.values[removed_index];
+
+                let old_val = std::mem::replace(&mut removed_entry.value, value);
+                removed_value = Some((key, old_val));
+                // removed_entry.value = value;
+                self.move_to_head(removed_index);
+            }
+
+            
+        } else {
+            if self.values.is_empty(){
+                self.head = 0;
+                self.tail = 0;
+                self.add_first(key, value)
+            } else {
+                if self.values.len() == CAP{
+                    let old_index = self.remove_tail();
+                    self.add_to_head_indexed(old_index, key, value)
+                } else {
+                    self.add_to_head(key, value);
+                }
+            }
+        }
+
+        self.locations.insert(k2, self.head);
+        removed_value
+        // println!("{:?}", self.values);
+    }
+
+    pub fn get(&mut self, key: &K) -> Option<&V>{
+        // let maybe_removed = self.locations.get(key);
+
         if let Some(index) = self.locations.get(key){
-            Some(&self.values[*index].value)
+            let index = *index;
+
+            if self.len() != 1{
+                self.move_to_head(index);
+            }
+
+            Some(&self.values[index].value)
+        } else{
+            None
+        }
+    }
+
+    pub fn get_mut(&mut self, key: &K) -> Option<&mut V>{
+        if let Some(index) = self.locations.get(key){
+            let index = *index;
+
+            if self.len() != 1{
+                self.move_to_head(index);
+            }
+
+            Some(&mut self.values[index].value)
         } else{
             None
         }
     }
 
     pub fn pop(&mut self, key: &K) -> Option<V>{
-        todo!();
+        if let Some(index) = self.locations.remove(key){
+            self.move_to_tail(index);
+            Some(self.values.pop().unwrap().value)
+        } else {
+            None
+        }
     }
     
     pub fn capacity(&self) -> usize{
-        self.capacity
+        CAP
+    }
+
+    pub fn clear(&mut self){
+        self.locations.clear();
+        self.values.clear();
+        self.head = NULL;
+        self.tail = NULL;
     }
 
     fn move_to_head(&mut self, index: usize){
@@ -93,6 +183,9 @@ where K: Hash + Eq + Clone{
         let prev = entry.prev;
         let next = entry.next;
 
+        if prev == NULL && next == NULL {
+            todo!();
+        }
 
         if prev != NULL {
             if next != NULL{
@@ -123,6 +216,56 @@ where K: Hash + Eq + Clone{
         self.head = index;
         self.values[head_index].prev = self.head;
 
+    }
+
+    fn swap_with_last(&mut self, index: usize){
+        let last_index = self.values.len() - 1;
+
+        let last_entry = &mut self.values[last_index];
+        let last_prev = last_entry.prev;
+        let last_next = last_entry.next;
+
+        if last_prev != NULL{
+            self.values[last_prev].next = index;
+        } else {
+            self.head = index;
+        }
+
+        if last_next != NULL {
+            self.values[last_next].prev = index;
+        } else {
+            self.tail = index;
+        }
+
+        self.values.swap(last_index, index);
+    }
+
+    fn move_to_tail(&mut self, index: usize){
+        let entry = &mut self.values[index];
+        let prev = entry.prev;
+        let next = entry.next;
+
+        if prev != NULL {
+            if next != NULL{
+                self.values[prev].next = next;
+            } else {
+                self.values[prev].next = NULL;
+            }
+        } else {
+            self.head = next;
+        }
+
+        if next != NULL {
+            if prev != NULL {
+                self.values[next].prev = prev;
+            } else {
+                self.values[next].prev = NULL;
+            }
+        } else {
+            self.tail = prev;
+        }
+
+        self.swap_with_last(index);
     }
 
     fn add_to_head(&mut self, key: K, value: V){
@@ -186,8 +329,12 @@ where K: Hash + Eq + Clone{
 
     }
 
-    fn len(&self) -> usize{
+    pub fn len(&self) -> usize{
         self.values.len()
+    }
+
+    pub fn is_empty(&self) -> bool{
+        self.len() == 0
     }
 }
 
@@ -205,7 +352,7 @@ mod tests {
 
     #[test]
     fn test_put_and_get() {
-        let mut cache = LruCache::new(2);
+        let mut cache: LruCache<_, _, 2> = LruCache::new();
         cache.put(1, 10);
         cache.put(2, 20);
         assert_opt_eq(cache.get(&1), 10);
@@ -215,7 +362,7 @@ mod tests {
 
     #[test]
     fn test_put_update() {
-        let mut cache: LruCache<String, Vec<u8>> = LruCache::new(1);
+        let mut cache: LruCache<String, Vec<u8>, 1> = LruCache::new();
         cache.put("1".to_string(), vec![10, 10]);
         cache.put("1".to_string(), vec![10, 19]);
         assert_opt_eq(cache.get(&"1".to_string()), vec![10, 19]);
@@ -224,7 +371,7 @@ mod tests {
 
     #[test]
     fn test_expire_lru() {
-        let mut cache: LruCache<String, String> = LruCache::new(2);
+        let mut cache: LruCache<String, String, 2> = LruCache::new();
         cache.put("foo1".to_string(), "bar1".to_string());
         cache.put("foo2".to_string(), "bar2".to_string());
         cache.put("foo3".to_string(), "bar3".to_string());
@@ -234,55 +381,29 @@ mod tests {
         assert!(cache.get(&"foo3".to_string()).is_none());
     }
 
-    // #[test]
-    // fn test_pop() {
-    //     let mut cache= LruCache::new(2);
-    //     cache.put(1, 10);
-    //     cache.put(2, 20);
-    //     assert_eq!(cache.len(), 2);
-    //     let opt1 = cache.pop(&1);
-    //     assert!(opt1.is_some());
-    //     assert_eq!(opt1.unwrap(), 10);
-    //     assert!(cache.get(&1).is_none());
-    //     assert_eq!(cache.len(), 1);
-    // }
+    #[test]
+    fn test_pop() {
+        let mut cache: LruCache<_,_,2> = LruCache::new();
+        cache.put(1, 10);
+        cache.put(2, 20);
+        assert_eq!(cache.len(), 2);
+        let opt1 = cache.pop(&1);
+        assert!(opt1.is_some());
+        assert_eq!(opt1.unwrap(), 10);
+        assert!(cache.get(&1).is_none());
+        assert_eq!(cache.len(), 1);
+    }
 
-    // #[test]
-    // fn test_change_capacity() {
-    //     let mut cache = LruCache::new(2);
-    //     assert_eq!(cache.capacity(), 2);
-    //     cache.put(1, 10);
-    //     cache.put(2, 20);
-    //     cache.change_capacity(1);
-    //     assert!(cache.get(&1).is_none());
-    //     assert_eq!(cache.capacity(), 1);
-    // }
 
-    // #[test]
-    // fn test_to_string() {
-    //     let mut cache = LruCache::new(3);
-    //     cache.put(1, 10);
-    //     cache.put(2, 20);
-    //     cache.put(3, 30);
-    //     assert_eq!(cache.to_string(), "{3: 30, 2: 20, 1: 10}".to_string());
-    //     cache.put(2, 22);
-    //     assert_eq!(cache.to_string(), "{2: 22, 3: 30, 1: 10}".to_string());
-    //     cache.put(6, 60);
-    //     assert_eq!(cache.to_string(), "{6: 60, 2: 22, 3: 30}".to_string());
-    //     cache.get(&3);
-    //     assert_eq!(cache.to_string(), "{3: 30, 6: 60, 2: 22}".to_string());
-    //     cache.change_capacity(2);
-    //     assert_eq!(cache.to_string(), "{3: 30, 6: 60}".to_string());
-    // }
-
-    // #[test]
-    // fn test_clear() {
-    //     let mut cache = LruCache::new(2);
-    //     cache.put(1, 10);
-    //     cache.put(2, 20);
-    //     cache.clear();
-    //     assert!(cache.get(&1).is_none());
-    //     assert!(cache.get(&2).is_none());
-    //     assert_eq!(cache.to_string(), "{}".to_string());
-    // }
+    #[test]
+    fn test_clear() {
+        let mut cache: LruCache<_, _, 2> = LruCache::new();
+        cache.put(1, 10);
+        cache.put(2, 20);
+        cache.clear();
+        assert!(cache.get(&1).is_none());
+        assert!(cache.get(&2).is_none());
+        assert_eq!(cache.len(), 0);
+        // assert_eq!(cache.to_string(), "{}".to_string());
+    }
 }
