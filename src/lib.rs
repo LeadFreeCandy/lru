@@ -1,3 +1,44 @@
+//! A fast, 100% safe, stack based least recently used cache. 
+//! 
+//! fast-lru uses a stack based array to store all the values, in conjunction 
+//! with a hashmap to store the keys. It gaurentees `O(1)` time complexity 
+//! for all operations, including `get()`, `put()`, `get_mut()`, and `pop()`.
+//! 
+//! 
+//! ## Example 
+//! 
+//! This a simple example of creating a cache, adding some values, and then reading them.
+//! 
+//! ```rust,no_run
+//! use lru::LruCache
+//! 
+//! fn main() {
+//!     let mut cache: LruCache<_, _, 2> = LruCache::new();
+//! 
+//!     cache.put("cow", 3);
+//!     cache.put("pig", 2);
+//! 
+//!     assert_eq!(*cache.get(&"cow").unwrap(), 3);
+//!     assert_eq!(*cache.get(&"pig").unwrap(), 2);
+//!     assert!(cache.get(&"dog").is_none());
+//! 
+//!     assert_eq!(cache.put("pig", 4), Some(2));
+//!     assert_eq!(cache.put("dog", 5), None);
+//! 
+//!     assert_eq!(*cache.get(&"dog").unwrap(), 5);
+//!     assert_eq!(*cache.get(&"pig").unwrap(), 4);
+//!     assert!(cache.get(&"cow").is_none());
+//! 
+//!     {
+//!         let v = cache.get_mut(&"pig").unwrap();
+//!         *v = 6;
+//!     }
+//! 
+//!     assert_eq!(*cache.get(&"pig").unwrap(), 6);
+//! }
+//! ```
+
+
 #![deny(unsafe_code)]
 // #![warn(missing_docs)]
 
@@ -28,6 +69,19 @@ pub struct LruCache<K, V, const CAP: usize> {
 
 impl <K, V, const CAP: usize> LruCache<K, V, CAP> 
 where K: Hash + Eq + Clone{
+
+    /// Creates a new cache with the given capacity. Capacity must be specified
+    /// as a constant parameter.
+    /// 
+    /// # Example
+    /// 
+    /// ```rust,no_run
+    /// use lru::LruCache;
+    /// 
+    /// // Create a cache with a capacity of 2.
+    /// let mut cache: LruCache<_, _, 2> = LruCache::new();
+    /// ```
+    /// 
     pub fn new() -> Self{
         Self {
             // capacity,
@@ -39,6 +93,22 @@ where K: Hash + Eq + Clone{
 
     }
 
+    /// Puts the key and value into the cache. If the key already exists, it will 
+    /// be moved to the front of the list and the value will be updated. If the 
+    /// cache is full, the least recently used key will be removed and returned.
+    /// 
+    /// # Example
+    /// 
+    /// ```rust,no_run
+    /// use lru::LruCache;
+    /// 
+    /// let mut cache: LruCache<_, _, 2> = LruCache::new();
+    /// 
+    /// assert_eq!(cache.put("cow", 3), None);
+    /// assert_eq!(cache.put("pig", 2), None);
+    /// assert_eq!(cache.put("pig", 4), Some(2));
+    /// ```
+    /// 
     pub fn put(&mut self, key: K, value: V) -> Option<V>{
         let k2 = key.clone();
         let val = self.locations.remove(&key);
@@ -83,6 +153,23 @@ where K: Hash + Eq + Clone{
         // println!("{:?}", self.values);
     }
 
+    /// Puts the key and value into the cache. If the key already exists, it will 
+    /// be moved to the front of the list and the value will be updated. If the 
+    /// cache is full, the least recently used key will be removed and the key 
+    /// value pair will be returned.
+    ///
+    /// # Example
+    /// 
+    /// ```rust,no_run
+    /// use lru::LruCache;
+    /// 
+    /// let mut cache: LruCache<_, _, 2> = LruCache::new();
+    /// 
+    /// assert_eq!(cache.put_key_value("cow", 3), None);
+    /// assert_eq!(cache.put_key_value("pig", 2), None);
+    /// assert_eq!(cache.put_key_value("pig", 4), Some(("pig", 2)));
+    /// ```
+    /// 
     pub fn push(&mut self, key: K, value: V) -> Option<(K, V)>{
         let k2 = key.clone();
         let val = self.locations.remove(&key);
@@ -127,6 +214,22 @@ where K: Hash + Eq + Clone{
         // println!("{:?}", self.values);
     }
 
+    /// Gets a reference to the value associated with the key. If the key is not in the cache,
+    /// None will be returned. If the key is in the cache, the value will be
+    /// moved to the front of the list and returned. 
+    /// 
+    /// # Example
+    /// 
+    /// ```rust,no_run
+    /// use lru::LruCache;
+    /// 
+    /// let mut cache: LruCache<_, _, 2> = LruCache::new();
+    /// 
+    /// assert_eq!(cache.get("cow"), None);
+    /// cache.put("cow", 3);
+    /// assert_eq!(cache.get("cow"), Some(3));
+    /// ```
+    /// 
     pub fn get(&mut self, key: &K) -> Option<&V>{
         // let maybe_removed = self.locations.get(key);
 
@@ -143,6 +246,22 @@ where K: Hash + Eq + Clone{
         }
     }
 
+    /// Gets a mutable reference to the value associated with the key. If the key is not in the cache,
+    /// None will be returned. If the key is in the cache, the value will be
+    /// moved to the front of the list and returned.
+    /// 
+    /// # Example
+    /// 
+    /// ```rust,no_run
+    /// use lru::LruCache;
+    /// 
+    /// let mut cache: LruCache<_, _, 2> = LruCache::new();
+    /// 
+    /// assert_eq!(cache.get_mut("cow"), None);
+    /// cache.put("cow", 3);
+    /// assert_eq!(cache.get_mut("cow"), Some(&mut 3));
+    /// ```
+    /// 
     pub fn get_mut(&mut self, key: &K) -> Option<&mut V>{
         if let Some(index) = self.locations.get(key){
             let index = *index;
@@ -157,6 +276,23 @@ where K: Hash + Eq + Clone{
         }
     }
 
+    /// Removes the key value pair from the cache. If the key is not in the cache,
+    /// None will be returned. If the key is in the cache, the value will be
+    /// removed and returned.
+    /// 
+    /// # Example
+    /// 
+    /// ```rust,no_run
+    /// use lru::LruCache;
+    /// 
+    /// let mut cache: LruCache<_, _, 2> = LruCache::new();
+    /// 
+    /// assert_eq!(cache.remove("cow"), None);
+    /// cache.put("cow", 3);
+    /// assert_eq!(cache.remove("cow"), Some(3));
+    /// assert_eq!(cache.get("cow"), None);
+    /// ```
+    /// 
     pub fn pop(&mut self, key: &K) -> Option<V>{
         if let Some(index) = self.locations.remove(key){
             self.move_to_tail(index);
@@ -166,10 +302,12 @@ where K: Hash + Eq + Clone{
         }
     }
     
+    /// Returns the number of key values that can be stored in the cache.
     pub fn capacity(&self) -> usize{
         CAP
     }
 
+    /// Clears the cache.
     pub fn clear(&mut self){
         self.locations.clear();
         self.values.clear();
@@ -329,6 +467,7 @@ where K: Hash + Eq + Clone{
 
     }
 
+    /// Returns the number of key values in the cache.
     pub fn len(&self) -> usize{
         self.values.len()
     }
@@ -405,5 +544,31 @@ mod tests {
         assert!(cache.get(&2).is_none());
         assert_eq!(cache.len(), 0);
         // assert_eq!(cache.to_string(), "{}".to_string());
+    }
+
+    #[test]
+    fn example() {
+        let mut cache: LruCache<_, _, 2> = LruCache::new();
+
+        cache.put("cow", 3);
+        cache.put("pig", 2);
+
+        assert_eq!(*cache.get(&"cow").unwrap(), 3);
+        assert_eq!(*cache.get(&"pig").unwrap(), 2);
+        assert!(cache.get(&"dog").is_none());
+
+        assert_eq!(cache.put("pig", 4), Some(2));
+        assert_eq!(cache.put("dog", 5), None);
+
+        assert_eq!(*cache.get(&"dog").unwrap(), 5);
+        assert_eq!(*cache.get(&"pig").unwrap(), 4);
+        assert!(cache.get(&"cow").is_none());
+
+        {
+            let v = cache.get_mut(&"pig").unwrap();
+            *v = 6;
+        }
+
+        assert_eq!(*cache.get(&"pig").unwrap(), 6);
     }
 }
