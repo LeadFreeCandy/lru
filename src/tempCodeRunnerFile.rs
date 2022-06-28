@@ -1,1 +1,0 @@
-self.move_to_tail(index);
